@@ -1,0 +1,117 @@
+# L4 production profile — Nemotron-3 Super 120B-A12B (NVFP4) on 4× L4 GPUs
+# per replica (g2-standard-48), tensor-parallel-size 4. Source: the Gemini
+# architectural deployment guide.
+#
+# This is a CHEAPER alternative to values-prod.yaml's 2× H100 path:
+#   - g2-standard-48 (4× L4) ≈ $5/hr vs a3-highgpu-2g (2× H100) ≈ $22/hr
+#   - L4 quota is far easier to get than H100
+#
+# Throughput claim is unverified — the Gemini doc cites ~500 tok/s aggregate
+# per replica, but L4's lower HBM bandwidth vs H100 means the real number
+# could be substantially lower. BENCHMARK BEFORE COMMITTING TO THIS PATH at
+# the 2000-user scale.
+#
+# If throughput holds, this is the right production target.
+
+replicaCount: 6   # per Gemini sizing (2000 DAU × 10% concurrency × duty cycle)
+
+image:
+  repository: nvcr.io/nim/nvidia/nemotron-3-super-120b-a12b
+  tag: "1.8.0-variant"
+  pullPolicy: IfNotPresent
+
+imagePullSecret: nvcr-pull-secret
+
+env:
+  - name: NIM_MAX_BATCH_SIZE
+    value: "32"
+  - name: NIM_KV_CACHE_DTYPE
+    value: "fp8"
+  - name: NIM_CACHE_PATH
+    value: "/data"
+  - name: NIM_TENSOR_PARALLEL_SIZE
+    value: "4"
+  - name: NGC_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: nemotron-secrets
+        key: ngc-api-key
+
+resources:
+  requests:
+    cpu: "32"
+    memory: "150Gi"
+  limits:
+    cpu: "32"
+    memory: "150Gi"
+
+gpu:
+  enabled: true
+  accelerator: "nvidia-l4"
+  count: 4
+
+probes:
+  enabled: true
+  startup:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 60   # 30 min
+  readiness:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 10
+  liveness:
+    httpGet:
+      path: /v1/health/live
+      port: 8000
+    periodSeconds: 30
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  metric:
+    type: external
+    name: vllm:num_requests_waiting
+    targetValue: "4"
+
+pdb:
+  enabled: true
+  minAvailable: 2
+
+topologySpread:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+serviceAccount:
+  create: true
+  name: nemotron-sa
+  workloadIdentity:
+    enabled: true
+    gsaEmail: "nemotron-gsa@PROJECT_ID.iam.gserviceaccount.com"
+
+gcsFuse:
+  enabled: true
+  bucketName: "PROJECT_ID-nemotron-weights"
+  mountPath: "/data"
+
+metrics:
+  enabled: true
+  port: 9400
+
+dcgmExporter:
+  enabled: true
+
+service:
+  type: ClusterIP
+  port: 8000
+  negEnabled: true
+  sessionAffinity: true
+
+nodeSelector:
+  cloud.google.com/gke-node-pool: "gpu-pool-l4"

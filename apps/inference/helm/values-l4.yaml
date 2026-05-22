@@ -1,0 +1,87 @@
+# L4 functional profile — 1× NVIDIA L4 GPU running Llama-3.1-Nemotron Nano 8B
+# via NIM. Real inference at ~$500/month per replica (on-demand) or much less
+# with Autopilot scale-to-zero. Validates the full inference path on a single
+# GPU before committing to multi-GPU H100.
+
+replicaCount: 1
+
+image:
+  repository: nvcr.io/nim/nvidia/llama-3.1-nemotron-nano-8b-v1
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecret: nvcr-pull-secret
+
+env:
+  - name: NIM_CACHE_PATH
+    value: "/data"
+  - name: NGC_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: nemotron-secrets
+        key: ngc-api-key
+
+resources:
+  requests:
+    cpu: "8"
+    memory: "32Gi"
+  limits:
+    cpu: "12"
+    memory: "48Gi"
+
+gpu:
+  enabled: true
+  accelerator: "nvidia-l4"
+  count: 1
+
+# Weight load is much faster for 8B than 120B; trim grace accordingly.
+probes:
+  enabled: true
+  startup:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 20   # 10 min
+  readiness:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 10
+  liveness:
+    httpGet:
+      path: /v1/health/live
+      port: 8000
+    periodSeconds: 30
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  metric:
+    type: external
+    name: vllm:num_requests_waiting
+    targetValue: "4"
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+metrics:
+  enabled: true
+  port: 9400
+
+dcgmExporter:
+  enabled: true
+
+serviceAccount:
+  create: true
+  name: nemotron-sa
+  workloadIdentity:
+    enabled: false  # set true + supply gsaEmail when Workload Identity is wired
+
+service:
+  type: ClusterIP
+  port: 8000
+  negEnabled: true
+  sessionAffinity: true

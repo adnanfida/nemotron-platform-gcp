@@ -1,0 +1,35 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "nemotron-inference.fullname" . }}
+  labels:
+    {{- include "nemotron-inference.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "nemotron-inference.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if eq .Values.autoscaling.metric.type "external" }}
+    # NOTE: requires the custom-metrics adapter (external.metrics.k8s.io) installed
+    # in the cluster. The vllm:num_requests_waiting metric is exposed by both the
+    # mock app and real vLLM/NIM containers and scraped by Managed Prometheus.
+    - type: External
+      external:
+        metric:
+          name: {{ .Values.autoscaling.metric.name | quote }}
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.autoscaling.metric.targetValue | quote }}
+    {{- else }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.metric.targetCPUUtilization }}
+    {{- end }}
+{{- end }}

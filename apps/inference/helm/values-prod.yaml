@@ -1,0 +1,115 @@
+# Production profile — Nemotron-3 Super 120B-A12B (NVFP4) on 2× H100 80GB
+# per replica, 20 baseline replicas autoscaling to 40. Per the design doc
+# in docs/architecture-2000-users.md.
+#
+# Derived from Spark's values-prod.yaml in the Implementation Catalog with
+# the following bug fixes layered in (Spark's version was missing all of
+# these, which would have produced a deployment that immediately fails):
+#   - probes (startup grace, readiness, liveness)
+#   - env vars (NIM_MAX_BATCH_SIZE, NIM_KV_CACHE_DTYPE, NIM_CACHE_PATH, NGC_API_KEY)
+#   - imagePullSecret for nvcr.io
+#   - serviceAccount with Workload Identity annotation
+#   - topologySpreadConstraints across 3 zones
+#   - HPA metric specification (was empty)
+
+replicaCount: 20
+
+image:
+  repository: nvcr.io/nim/nvidia/nemotron-3-super-120b-a12b
+  tag: "1.8.0-variant"
+  pullPolicy: IfNotPresent
+
+imagePullSecret: nvcr-pull-secret
+
+env:
+  - name: NIM_MAX_BATCH_SIZE
+    value: "32"
+  - name: NIM_KV_CACHE_DTYPE
+    value: "fp8"
+  - name: NIM_CACHE_PATH
+    value: "/data"
+  - name: NGC_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: nemotron-secrets
+        key: ngc-api-key
+
+resources:
+  requests:
+    cpu: "24"
+    memory: "200Gi"
+  limits:
+    cpu: "24"
+    memory: "200Gi"
+
+gpu:
+  enabled: true
+  accelerator: "nvidia-h100-80gb"
+  count: 2
+
+# 30-min startup grace for 120B weight load on first boot.
+probes:
+  enabled: true
+  startup:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 60   # 30 min
+  readiness:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 10
+  liveness:
+    httpGet:
+      path: /v1/health/live
+      port: 8000
+    periodSeconds: 30
+
+autoscaling:
+  enabled: true
+  minReplicas: 20
+  maxReplicas: 40
+  metric:
+    type: external
+    name: vllm:num_requests_waiting
+    targetValue: "4"   # queue depth target per replica
+
+pdb:
+  enabled: true
+  minAvailable: 18   # 90% of baseline
+
+topologySpread:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+serviceAccount:
+  create: true
+  name: nemotron-sa
+  workloadIdentity:
+    enabled: true
+    gsaEmail: "nemotron-gsa@PROJECT_ID.iam.gserviceaccount.com"  # template — replace per env
+
+gcsFuse:
+  enabled: true
+  bucketName: "PROJECT_ID-nemotron-weights"  # template — replace per env
+  mountPath: "/data"
+
+metrics:
+  enabled: true
+  port: 9400
+
+dcgmExporter:
+  enabled: true
+
+service:
+  type: ClusterIP
+  port: 8000
+  negEnabled: true
+  sessionAffinity: true
+
+nodeSelector:
+  cloud.google.com/gke-node-pool: "gpu-pool"

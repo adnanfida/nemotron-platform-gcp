@@ -1,0 +1,78 @@
+# Dummy profile — real vLLM container with `--load-format dummy --device cpu`.
+# Random-init weights, no GPU. Validates the real vLLM container's startup args,
+# probe wiring, and API schema — things the Python mock can't catch because it
+# isn't vLLM. Source: the "Layer 1" dry-run pattern from the Gemini design.
+#
+# Requires beefy CPU memory: even with random weights vLLM allocates the full
+# parameter tensor (~60GB for 120B-NVFP4 / ~240GB for BF16). Set replicaCount: 1
+# and run on a large CPU node (e.g. n2-highmem-32 or larger).
+
+replicaCount: 1
+
+image:
+  repository: vllm/vllm-openai
+  tag: "v0.7.2"
+  pullPolicy: IfNotPresent
+
+args:
+  - "--model"
+  - "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
+  - "--load-format"
+  - "dummy"
+  - "--device"
+  - "cpu"
+  - "--port"
+  - "8000"
+  - "--max-model-len"
+  - "2048"
+
+resources:
+  requests:
+    cpu: "16"
+    memory: "120Gi"
+  limits:
+    cpu: "32"
+    memory: "240Gi"
+
+# vLLM exposes its own /metrics on the same port as the API.
+metrics:
+  enabled: true
+  port: 8000
+  path: /metrics
+  interval: 15s
+
+ports:
+  api: 8000
+  metrics: 8000
+
+# Generous startup grace — even with dummy weights, vLLM's CPU init is slow.
+probes:
+  enabled: true
+  startup:
+    httpGet:
+      path: /health
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 30   # 15 min
+  readiness:
+    httpGet:
+      path: /health
+      port: 8000
+    periodSeconds: 15
+  liveness:
+    httpGet:
+      path: /health
+      port: 8000
+    periodSeconds: 60
+
+autoscaling:
+  enabled: false
+
+pdb:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 8000
+  negEnabled: false
+  sessionAffinity: false

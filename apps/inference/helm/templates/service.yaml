@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nemotron-inference.fullname" . }}
+  labels:
+    {{- include "nemotron-inference.labels" . | nindent 4 }}
+  {{- if .Values.service.negEnabled }}
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- if .Values.service.sessionAffinity }}
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 600
+  {{- end }}
+  ports:
+    - name: api
+      port: {{ .Values.service.port }}
+      targetPort: api
+      protocol: TCP
+  selector:
+    {{- include "nemotron-inference.selectorLabels" . | nindent 4 }}
