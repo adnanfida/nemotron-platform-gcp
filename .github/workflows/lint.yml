@@ -1,0 +1,54 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-fmt:
+    runs-on: ubuntu-latest
+    name: terraform fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+      - name: terraform fmt -check -recursive
+        run: |
+          if [ -d infra/terraform ] && [ -n "$(find infra/terraform -name '*.tf' -print -quit)" ]; then
+            terraform fmt -check -recursive infra/terraform
+          else
+            echo "No .tf files yet; skipping."
+          fi
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    name: helm lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+      - name: helm lint
+        run: |
+          if [ -d apps/inference/helm ] && [ -f apps/inference/helm/Chart.yaml ]; then
+            helm lint apps/inference/helm
+          else
+            echo "No Helm chart yet; skipping."
+          fi
+
+  markdown-links:
+    runs-on: ubuntu-latest
+    name: markdown link check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: '.github/markdown-link-check.json'
+        continue-on-error: true

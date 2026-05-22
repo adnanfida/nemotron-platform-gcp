@@ -1,0 +1,83 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Helm
+charts/
+*.tgz
+.helm-cache/
+
+# Node / TypeScript (model-gateway)
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+.npm
+.eslintcache
+
+# Python (mock inference container)
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Go (alternative model-gateway)
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — NEVER commit
+*.key
+*.pem
+*.crt
+*.p12
+credentials.json
+service-account*.json
+.env
+.env.local
+.env.*.local
+
+# Build / Cache
+.cache/
+.tmp/
+tmp/
+coverage/
+.nyc_output/
+
+# Cloud SDK config (in case of accidental check-in)
+.config/gcloud/
+
+# Claude Code workspace state
+.claude/
