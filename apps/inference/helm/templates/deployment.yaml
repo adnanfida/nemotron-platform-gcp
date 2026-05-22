@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nemotron-inference.fullname" . }}
+  labels:
+    {{- include "nemotron-inference.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nemotron-inference.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nemotron-inference.selectorLabels" . | nindent 8 }}
+      {{- if .Values.gcsFuse.enabled }}
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "1"
+        gke-gcsfuse/memory-limit: "2Gi"
+        gke-gcsfuse/ephemeral-storage-limit: "80Gi"
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "nemotron-inference.serviceAccountName" . }}
+      {{- with .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
+      {{- if or .Values.gpu.enabled .Values.nodeSelector }}
+      nodeSelector:
+        {{- if .Values.gpu.enabled }}
+        cloud.google.com/gke-accelerator: {{ .Values.gpu.accelerator | quote }}
+        {{- end }}
+        {{- with .Values.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpread.maxSkew }}
+          topologyKey: {{ .Values.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ .Values.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "nemotron-inference.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      containers:
+        - name: inference
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.ports.api }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.ports.metrics }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            requests:
+              {{- toYaml .Values.resources.requests | nindent 14 }}
+              {{- if .Values.gpu.enabled }}
+              nvidia.com/gpu: {{ .Values.gpu.count | quote }}
+              {{- end }}
+            limits:
+              {{- toYaml .Values.resources.limits | nindent 14 }}
+              {{- if .Values.gpu.enabled }}
+              nvidia.com/gpu: {{ .Values.gpu.count | quote }}
+              {{- end }}
+          {{- if .Values.probes.enabled }}
+          startupProbe:
+            {{- toYaml .Values.probes.startup | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          {{- end }}
+          {{- if .Values.gcsFuse.enabled }}
+          volumeMounts:
+            - name: weights
+              mountPath: {{ .Values.gcsFuse.mountPath }}
+              readOnly: false
+          {{- end }}
+        {{- if .Values.dcgmExporter.enabled }}
+        - name: dcgm-exporter
+          image: {{ .Values.dcgmExporter.image }}
+          ports:
+            - name: dcgm
+              containerPort: {{ .Values.dcgmExporter.port }}
+              protocol: TCP
+          securityContext:
+            runAsNonRoot: false
+            capabilities:
+              add: ["SYS_ADMIN"]
+        {{- end }}
+      {{- if .Values.gcsFuse.enabled }}
+      volumes:
+        - name: weights
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            readOnly: false
+            volumeAttributes:
+              bucketName: {{ .Values.gcsFuse.bucketName | quote }}
+              mountOptions: "implicit-dirs,file-cache:max-size-mb:80000,file-cache:cache-file-for-range-read:true"
+      {{- end }}

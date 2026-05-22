@@ -1,0 +1,135 @@
+# Default values for nemotron-inference.
+# Each profile (values-mock.yaml, values-l4.yaml, values-prod.yaml, etc.)
+# overrides only what differs from these defaults.
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/adnanfida/nemotron-mock
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Optional image pull secret (NIM container from nvcr.io needs this).
+# Set to "nvcr-pull-secret" for any NIM profile.
+imagePullSecret: ""
+
+# Container args passed to the inference engine. Profiles set these.
+# For NIM the entrypoint handles args, so this is usually empty.
+# For vLLM (including dummy mode) this is the full vllm command flags.
+args: []
+
+# Environment variables. Profiles add per-engine config here.
+env: []
+
+# Ports exposed by the container.
+ports:
+  api: 8000
+  metrics: 9400
+
+# Pod resource requests/limits. Profiles set GPU count.
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+
+# GPU node selection (set by GPU profiles).
+gpu:
+  enabled: false
+  accelerator: ""        # e.g. nvidia-l4, nvidia-h100-80gb
+  count: 0
+
+# Service configuration.
+service:
+  type: ClusterIP
+  port: 8000
+  # Network Endpoint Group annotation for direct pod targeting from
+  # a Cloud Run gateway / global LB. Profiles can disable for local dev.
+  negEnabled: true
+  # Session affinity by header — required for KV-cache prefix reuse.
+  # The Model Gateway sets X-Replica-Hint; the Service uses it via NEG-aware LB.
+  sessionAffinity: false
+
+# Probes — the design spec gives 30 min for weight load on a fresh pod.
+# Mock profile overrides to faster timing.
+probes:
+  enabled: true
+  startup:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 60   # 30 min total grace for weight load
+  readiness:
+    httpGet:
+      path: /v1/health/ready
+      port: 8000
+    periodSeconds: 10
+  liveness:
+    httpGet:
+      path: /v1/health/live
+      port: 8000
+    periodSeconds: 30
+
+# Horizontal Pod Autoscaler.
+# In production the metric is the external custom metric vllm:num_requests_waiting
+# exported via Managed Prometheus + custom-metrics adapter. Falls back to CPU.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  metric:
+    # "external" requires custom-metrics adapter; "cpu" uses built-in.
+    type: cpu
+    name: vllm:num_requests_waiting
+    targetValue: "4"        # used when type=external; queue depth per replica
+    targetCPUUtilization: 80  # used when type=cpu
+
+# PodDisruptionBudget.
+pdb:
+  enabled: false
+  minAvailable: 1
+
+# Topology spread — required across 3 zones for prod.
+topologySpread:
+  enabled: false
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+# ServiceAccount + Workload Identity binding.
+serviceAccount:
+  create: true
+  name: nemotron-sa
+  workloadIdentity:
+    enabled: false
+    gsaEmail: ""   # e.g. nemotron-gsa@PROJECT.iam.gserviceaccount.com
+
+# GCS-FUSE sidecar — mounts a GCS bucket as /data for weight caching.
+gcsFuse:
+  enabled: false
+  bucketName: ""
+  mountPath: "/data"
+
+# Managed Prometheus scrape config (PodMonitoring CR).
+metrics:
+  enabled: false
+  port: 9400
+  path: /metrics
+  interval: 15s
+
+# DCGM exporter sidecar (GPU telemetry).
+dcgmExporter:
+  enabled: false
+  image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.7-3.5.0-ubuntu22.04
+  port: 9400
+
+# Additional pod-level config.
+nodeSelector: {}
+tolerations: []
+affinity: {}

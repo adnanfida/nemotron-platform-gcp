@@ -66,21 +66,25 @@ nemotron-platform-gcp/
 
 ## Testing profiles (no H100 quota required to start)
 
-The architecture supports three deployment profiles, lightest to heaviest:
+The architecture supports five Helm values profiles, lightest to heaviest:
 
 | Profile | GPU | Model | What it validates | Monthly cost |
 |---|---|---|---|---|
-| **Mock** | none | CPU stub container | Manifests, gateway, routing, auth, observability, HPA wiring | ~$80 |
-| **Functional** | 1× L4 | Llama-3.1-Nemotron Nano 8B | All of Mock + real inference path | ~$300–600 |
-| **Production** | 2× H100 | Nemotron-3 Super 120B (NVFP4) | The full design | ~$178K |
+| **Mock** (`values-mock.yaml`) | none | CPU Python stub | Manifests, gateway, routing, observability, HPA wiring | ~$80 |
+| **Dummy** (`values-dummy.yaml`) | none | real vLLM container w/ `--load-format dummy --device cpu` | All of Mock + actual vLLM container startup args, probe wiring, API schema | ~$200 |
+| **Functional** (`values-l4.yaml`) | 1× L4 | Llama-3.1-Nemotron Nano 8B NIM | All of Dummy + real inference path on a single GPU | ~$300–600 |
+| **L4 Production** (`values-l4-prod.yaml`) | 4× L4 | Nemotron 120B-NVFP4 NIM | The full design at lower per-replica cost (~$5/hr vs $22/hr H100) — throughput unverified | depends on scale |
+| **Production** (`values-prod.yaml`) | 2× H100 | Nemotron 120B-NVFP4 NIM | The full design doc target | ~$178K |
 
-Each profile is a separate Terraform env + Helm values overlay. Switching profiles is a values file change, not a re-architecture.
+Each profile is a Helm `--values` overlay against the same chart. Switching profiles is a values file change, not a re-architecture.
 
 ## Current status
 
-🚧 **Repo scaffolding only.** Module directories are stubs. The design doc is the source of truth; modules will be filled in incrementally.
+✅ **Phase 1 + Phase 2 scaffolded** — apps (mock, helm chart, gateway) and Terraform (six modules + dev env) all in place and lint-clean. See [STATUS.md](STATUS.md) for what landed and what's deferred.
 
-See [NEXT_STEPS.md](NEXT_STEPS.md) for the work queue.
+🚧 **Not yet deployed** — `terraform apply` against a real GCP project hasn't been validated. The maintainer must verify post-merge.
+
+See [NEXT_STEPS.md](NEXT_STEPS.md) for the work queue (Phase 1.5: wire up gateway stubs after first apply; Phase 3: CI/CD pipeline; Phase 4: operational artifacts).
 
 ## License
 

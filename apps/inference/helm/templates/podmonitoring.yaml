@@ -1,0 +1,16 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ include "nemotron-inference.fullname" . }}
+  labels:
+    {{- include "nemotron-inference.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "nemotron-inference.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: {{ .Values.metrics.path }}
+      interval: {{ .Values.metrics.interval }}
+{{- end }}

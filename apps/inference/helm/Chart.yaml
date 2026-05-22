@@ -1,0 +1,17 @@
+apiVersion: v2
+name: nemotron-inference
+description: Nemotron-3 inference workload for GKE (NIM, vLLM, or CPU mock)
+type: application
+version: 0.1.0
+appVersion: "1.8.0"
+kubeVersion: ">=1.28.0-0"
+maintainers:
+  - name: adnanfida
+    url: https://github.com/adnanfida
+keywords:
+  - nemotron
+  - llm
+  - inference
+  - gke
+  - nim
+  - vllm
