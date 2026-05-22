@@ -10,45 +10,71 @@ permissions:
   contents: read
 
 jobs:
-  terraform-fmt:
+  terraform:
     runs-on: ubuntu-latest
-    name: terraform fmt
+    name: terraform fmt + validate
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.0
+          terraform_version: 1.9.8
       - name: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive infra/terraform
+      - name: terraform validate (modules + envs)
         run: |
-          if [ -d infra/terraform ] && [ -n "$(find infra/terraform -name '*.tf' -print -quit)" ]; then
-            terraform fmt -check -recursive infra/terraform
-          else
-            echo "No .tf files yet; skipping."
-          fi
+          set -e
+          for d in infra/terraform/modules/*/ infra/terraform/envs/*/; do
+            if [ -n "$(find "$d" -maxdepth 1 -name '*.tf' -print -quit)" ]; then
+              echo "=== validating $d ==="
+              (cd "$d" && terraform init -backend=false -input=false -no-color > /dev/null && terraform validate -no-color)
+            fi
+          done
 
-  helm-lint:
+  helm:
     runs-on: ubuntu-latest
-    name: helm lint
+    name: helm lint + kubeconform
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.0
-      - name: helm lint
+      - name: install kubeconform
         run: |
-          if [ -d apps/inference/helm ] && [ -f apps/inference/helm/Chart.yaml ]; then
-            helm lint apps/inference/helm
-          else
-            echo "No Helm chart yet; skipping."
-          fi
+          curl -fsSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: helm lint
+        run: helm lint apps/inference/helm
+      - name: kubeconform per profile
+        run: |
+          set -e
+          for p in mock dummy l4 prod l4-prod; do
+            echo "=== values-$p.yaml ==="
+            helm template testrel apps/inference/helm -f "apps/inference/helm/values-$p.yaml" \
+              | kubeconform -strict -ignore-missing-schemas -summary
+          done
 
-  markdown-links:
+  gateway:
     runs-on: ubuntu-latest
-    name: markdown link check
+    name: model-gateway typecheck
+    defaults:
+      run:
+        working-directory: apps/model-gateway
     steps:
       - uses: actions/checkout@v4
-      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+      - uses: actions/setup-node@v4
         with:
-          use-quiet-mode: 'yes'
-          config-file: '.github/markdown-link-check.json'
-        continue-on-error: true
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: apps/model-gateway/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  mock:
+    runs-on: ubuntu-latest
+    name: mock container syntax check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m py_compile apps/inference/mock/app.py
