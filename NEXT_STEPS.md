@@ -1,63 +1,65 @@
 # Next Steps
 
-Roadmap for filling in the scaffolding. Items grouped by phase, in priority order.
+Roadmap for filling in the remaining work. Items grouped by phase, in priority order. See [STATUS.md](STATUS.md) for what's already landed.
 
-## Phase 1 — Mock testing profile (highest priority for first iteration)
+## Phase 1 — Mock testing profile — DONE (PR feat/phase1-phase2-scaffold)
 
-**Goal:** validate the full architecture end-to-end without GPU quota or cost. Catches every architectural bug except the inference-specific ones.
+- [x] CPU-only stub inference container (`apps/inference/mock/`)
+- [x] Helm chart for inference with five values profiles (mock, dummy, l4, prod, l4-prod)
+- [x] Cloud Run model gateway skeleton (Hono + distroless), with `services/redis.ts` and `middleware/tokenCounter.ts` as stubs
+- [x] CI: helm lint + kubeconform + tsc + py_compile
+- [ ] Smoke test against minikube to confirm Mock profile works locally — **operator task post-merge**
+- [ ] `apps/inference/mock/docker-compose.yaml` and `README.md` — trivial, deferred
 
-- [ ] Write CPU-only stub inference container (`apps/inference/mock/`)
-  - Speaks OpenAI `/v1/chat/completions` API
-  - Returns canned/templated responses with realistic decode delays
-  - Exposes `vllm:num_requests_waiting` Prometheus metric (so HPA wiring works)
-  - Exposes `/v1/health/ready` and `/v1/health/live`
-  - Python Flask is fine; ~100 LoC
-- [ ] Write Helm chart for inference (`apps/inference/helm/`) with profile values
-  - `values-mock.yaml` (CPU stub, no GPU request)
-  - `values-l4.yaml` (1× L4, Nano 8B NIM)
-  - `values-prod.yaml` (2× H100, 120B NIM)
-- [ ] Write Cloud Run model gateway skeleton (`apps/model-gateway/`)
-  - TypeScript (matches `nemotron-on-gke` language choice)
-  - Implements: SSE proxy, Memorystore session lookup, prompt shaping, cost emit
-- [ ] Write CI: `helm lint`, `kubeconform` against the rendered chart
-- [ ] Smoke test against minikube to confirm Mock profile works locally
+## Phase 2 — Terraform infra modules — DONE for modules + dev env (same PR)
 
-## Phase 2 — Terraform infra modules
+- [x] `modules/networking`, `iam`, `cluster`, `data-plane`, `observability`, `apigee`
+- [x] `envs/dev` — Mock profile sized (~$80/month)
+- [ ] `envs/staging` — Functional profile (1× L4 + Nano 8B) — next session
+- [ ] `envs/prod` — full production sizing — pending the H100 vs 4× L4 decision (see Open Questions)
+- [x] CI: terraform fmt -check + validate per module and env
 
-- [ ] `modules/networking` — VPC, subnets in 3 zones, Cloud NAT, PSC endpoints for Memorystore/Firestore/Secret Manager, VPC-SC perimeter around weights bucket + Secret Manager
-- [ ] `modules/cluster` — GKE Standard regional, private, Workload Identity on, node pools (system + gpu-on-demand + gpu-spot)
-- [ ] `modules/iam` — Service accounts (nemotron-gsa), Workload Identity binding (KSA → GSA), role assignments
-- [ ] `modules/data-plane` — GCS bucket (multi-region, CMEK), Memorystore Redis Standard, Firestore database, BigQuery dataset, KMS keyring + keys, Artifact Registry repository
-- [ ] `modules/observability` — Managed Prometheus, custom-metrics adapter, dashboards (Cloud Monitoring), alert policies, SLOs
-- [ ] `modules/apigee` — Apigee org provisioning, API proxies, products, per-tenant quotas
-- [ ] `envs/dev` — calls modules with dev-sized parameters (no Apigee, single zone, minimal sizing)
-- [ ] `envs/staging` — staging sized (1 GPU replica, smaller Memorystore)
-- [ ] `envs/prod` — full production sizing per design doc
-- [ ] CI: `terraform fmt -check`, `tflint`, `terraform validate` per module
+## Phase 1.5 — Wire up the gateway's stubs (after dev env is applied)
 
-## Phase 3 — CI/CD pipeline
+These were left as deliberate stubs because they need real GCP infra to test against.
 
-- [ ] Cloud Build trigger on push to main (builds Model Gateway image)
+- [ ] Real Memorystore client in `apps/model-gateway/src/services/redis.ts` (ioredis, read MEMORYSTORE_HOST + MEMORYSTORE_PORT from env). Wire host into the Cloud Run service via `module.data_plane.memorystore_host`.
+- [ ] Real Pub/Sub publisher in `apps/model-gateway/src/middleware/tokenCounter.ts`. Topic created in a follow-up data-plane module change.
+- [ ] Add prompt shaping (max_tokens cap, safety filters) to the gateway.
+- [ ] Add request cancellation propagation (close upstream fetch when client disconnects).
+
+## Phase 2.5 — Custom metrics adapter
+
+HPA on `vllm:num_requests_waiting` requires the `external.metrics.k8s.io` adapter. The Helm chart references the metric but the adapter is a separate install.
+
+- [ ] Add `apps/custom-metrics-adapter/` with the GMP adapter Helm install or a Cloud Console runbook.
+- [ ] Document the install step in the env READMEs.
+
+## Phase 3 — CI/CD pipeline (deferred — needs operator decisions)
+
+- [ ] Cloud Build trigger on push to main (builds Model Gateway image, pushes to Artifact Registry)
 - [ ] Cloud Deploy pipeline definition with canary (5%) → soak (10%, 30 min) → rollout stages
 - [ ] Model weight release pipeline (separate, manual gated, blue/green at Service label level)
-- [ ] GitHub Actions integration (Workload Identity Federation, no PAT)
+- [ ] GitHub Actions to GCP via Workload Identity Federation (no long-lived PAT)
 
-## Phase 4 — Operational artifacts
+## Phase 4 — Operational artifacts (deferred — needs first real deploy first)
 
 - [ ] Runbook (`docs/runbook.md`) — on-call procedures, common failures, debug recipes
 - [ ] SLI/SLO definitions (`docs/slo.md`) — formal SLOs with error-budget policy
-- [ ] Cost tracking BigQuery views + scheduled queries (`docs/cost-analytics.md`)
+- [ ] Cost tracking BigQuery views + scheduled queries
 - [ ] On-call alert routing (PagerDuty / Opsgenie integration)
+- [ ] Real chart definitions in the observability dashboard (current is skeleton with 2 starter charts)
 
-## Open Questions (from design doc)
+## Open Questions (need operator answer before Phase 2 envs/prod)
 
 1. **Apigee X vs Cloud API Gateway** — decision hinges on tenant count and SLA differentiation. Apigee is ~$2K/mo even for low volume.
-2. **3-year CUD commitment** — acceptable, or plan for 1-year + spot mix?
-3. **NVAIE entitlement on NGC org** — required for the 120B NIM container. Confirm before Phase 2.
-4. **Spend caps for dev/staging environments** — Mock profile (~$80/mo) is cheap; Functional with 1× L4 left running costs ~$500/mo if not scaled to zero.
+2. **3-year CUD commitment for prod GPUs** — acceptable, or plan for 1-year + spot mix?
+3. **NVAIE entitlement on the NGC org** — confirm before any prod deploy. Without it, the 120B NIM container won't pull.
+4. **L4 NVFP4 throughput claim** — the `values-l4-prod.yaml` profile assumes ~500 tok/s/replica from the Gemini doc, but that number is unverified. Find a third-party benchmark (Artificial Analysis, NVIDIA, vLLM community) before committing prod to the L4 path.
+5. **Workload shape** — design doc assumes 2,000 concurrent active sessions (200 RPS sustained). Gemini doc assumes 2,000 DAU × 10% concurrency = ~67 parallel generations. These differ 10×. Confirm which is real.
 
 ## Decisions worth revisiting
 
 - **Model gateway language**: TypeScript vs Go. TypeScript matches `nemotron-on-gke`; Go gives lower memory footprint on Cloud Run and is more idiomatic for proxying.
 - **Helm vs Kustomize vs Config Connector**: chose Helm for templating multi-env values. Kustomize is more K8s-native but worse for environment-specific knob tuning. Config Connector eliminates Terraform for K8s-managed resources but adds operator complexity.
-- **One repo vs split (infra-only + app-only)**: chose monorepo for ease of cross-cutting changes. Split repos make per-team ownership clearer but require coordination.
+- **One repo vs split**: monorepo for ease of cross-cutting changes. Split repos make per-team ownership clearer but require coordination.
